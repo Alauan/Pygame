@@ -1,7 +1,8 @@
-from math import copysign, sqrt, pi
+from math import copysign, sqrt, pi, cos, sin
 import pygame as pg
 from PIL import Image
 from random import random
+import numpy as np
 import sys
 
 pg.init()
@@ -10,6 +11,8 @@ screen = pg.display.set_mode((900, 500))
 
 TILEWIDTH = 45
 TILEHEIGHT = 15
+GREY = pg.Color((120, 125, 130))
+WHITE = pg.Color((255, 255, 255))
 
 
 def image_to_map(image_name):
@@ -34,16 +37,7 @@ class Plataforma:
         self._surf_width = surface.get_width()
         self._surf_height = surface.get_height()
         self.rect = pg.Rect(self._pos, self._surf_height - 50, self._width, 20)
-        self._velocity = [0, 0, 0]
-
-    @property
-    def velocity(self):
-        return sum(self._velocity)/len(self._velocity)
-
-    @velocity.setter
-    def velocity(self, new):
-        self._velocity.append(new)
-        self._velocity.pop(0)
+        self.velocity = 0
 
     @property
     def width(self):
@@ -73,7 +67,7 @@ class Plataforma:
 class Bola:
     def __init__(self, radius, surface, pos, color=(255, 255, 255), vel_y=3, vel_x=3):
         self._radius = radius
-        self.pos = list(pos)
+        self._pos = list(pos)
         self._vel_y = vel_y
         self._vel_x = vel_x
         self._vel = sqrt(vel_x ** 2 + vel_y ** 2)
@@ -85,6 +79,9 @@ class Bola:
         self._surf_width = surface.get_width()
         self._surf_height = surface.get_height()
 
+        self._collision_points_ref = [(cos(n * pi/4) * self._radius, sin(n * pi/4) * self._radius) for n in range(8)]
+        self._collision_points = []
+
         # m -> pixel, s -> frame time
         self._spin = 0.1  # velocidade angular: rad/s
         self._mass = 1  # kg
@@ -92,6 +89,15 @@ class Bola:
         self._ec_rot = (self._i * self._spin ** 2) / 2  # energia cinética: joules
         self._ec_x = (self._mass * self._vel_x ** 2) / 2  # energia de translação no eixo x: joules
         self._ec_y = (self._mass * self._vel_y ** 2) / 2  # energia de translação no eixo y: joules
+
+    @property
+    def pos(self):
+        return self._pos
+
+    @pos.setter
+    def pos(self, new):
+        self._pos = new
+        self._collision_points = [(x + new[0], y + new[1]) for x, y in self._collision_points_ref]
 
     @property
     def vel_x(self):
@@ -135,12 +141,11 @@ class Bola:
 
     def move(self, gravity=0.0):
         self.rotation += self.spin
-        self.pos[0] += self._vel_x
-        self.pos[1] += self._vel_y
+        self.pos = [self.pos[0] + self.vel_x, self.pos[1] + self.vel_y]
         self.vel_y += gravity
 
-    def aero_move(self, gravity=0.0, drag=0.005):
-        k = 0.02
+    def aero_move(self, gravity=0.0, drag=0.004):
+        k = 0.03
         self.vel_x += self.spin * self.vel_y * k
         self.vel_y -= self.spin * self.vel_x * k
 
@@ -150,21 +155,35 @@ class Bola:
 
         self.move(gravity)
 
+    def collidemap(self, tile_map, tile_width, tile_height):
+        """ Return the side on witch the ball collided with any tile in a map and the tile indexes"""
+        row1 = int((self.pos[1] - self._radius) // tile_height)
+        row2 = int((self.pos[1] + self._radius)//tile_height + 1)
+        col1 = int((self.pos[0] - self._radius)//tile_width)
+        col2 = int((self.pos[0] + self._radius)//tile_width + 1)
+        in_range = np.array(tile_map, dtype=object)[row1:row2, col1:col2]
+
+        for y, row in enumerate(in_range):
+            for x, rect in enumerate(row):
+                if rect:
+                    side = self.colliderect(rect)
+                    if side:
+                        return side, y + row1, x + col1
+        return None, None, None
+
     def colliderect(self, rect):
         """ return the side in witch the ball hit a rectangle"""
-        x = self.pos[0] + self.vel_x + copysign(self._radius, self._vel_x)
-        y = self.pos[1] + self.vel_y + copysign(self._radius, self._vel_y)
-
-        if rect.collidepoint(x, self.pos[1]):
-            if self.vel_x > 0:
-                return 'left'
-            if self.vel_x < 0:
-                return 'right'
-        if rect.collidepoint(self.pos[0], y):
-            if self.vel_y > 0:
-                return 'bottom'
-            if self.vel_y < 0:
-                return 'top'
+        for point in self._collision_points:
+            if rect.collidepoint(point[0] + self.vel_x, point[1]):
+                if self.vel_x > 0:
+                    return 'left'
+                if self.vel_x < 0:
+                    return 'right'
+            if rect.collidepoint(point[0], point[1] + self.vel_y):
+                if self.vel_y > 0:
+                    return 'bottom'
+                if self.vel_y < 0:
+                    return 'top'
 
     def collidesurf(self):
         """ returns the side on witch the ball hit its own surface border"""
@@ -180,18 +199,18 @@ class Bola:
         if y > self._surf_height:
             return 'bottom'
 
-    def random_hit(self, is_horizontal: bool):
+    def random_hit(self, side):
         """ a hit that the absolute _velocity is kept but the X and Y velocities are changed randomly"""
         k = random()
 
         self._vel_x = sqrt(self._vel ** 2 * k) * copysign(1, self._vel_x)
         self._vel_y = sqrt(self._vel ** 2 * (1 - k)) * copysign(1, self._vel_y)
-        if is_horizontal:
+        if side in ('right', 'left'):
             self._vel_x *= -1
         else:
             self._vel_y *= -1
 
-    def spin_hit(self, side, grip=0.2, plat_vel=0.0, bump=1.0):
+    def spin_hit(self, side, grip=0.2, plat_vel=0.0, bump=0.0):
         """ a hit with spin """
         if not 0 <= grip <= 1:
             raise ValueError("grip must be between 0 and 1")
@@ -200,21 +219,20 @@ class Bola:
         ini_ec_x = self._ec_x
         if side == 'right':
             self.vel_y = copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) * grip + self.vel_y * (1 - grip)
-            self.vel_x *= -1
+            self.vel_x = self.vel_x * -1 - copysign(bump, self.vel_x)
             self.spin = copysign(sqrt(ini_ec_y * 2 / self._i) * grip, self.vel_y) + self.spin * (1 - grip)
         elif side == 'left':
             self.vel_y = -copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) * grip + self.vel_y * (1 - grip)
-            self.vel_x *= -1
+            self.vel_x = self.vel_x * -1 - copysign(bump, self.vel_x)
             self.spin = -copysign(sqrt(ini_ec_y * 2 / self._i) * grip, self.vel_y) + self.spin * (1 - grip)
         elif side == 'top':
             self.vel_x = copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) * grip + self.vel_x * (1 - grip)
-            self.vel_y *= -1
+            self.vel_y = self.vel_y * -1 - copysign(bump, self.vel_y)
             self.spin = copysign(sqrt(ini_ec_x * 2 / self._i) * grip, self.vel_x) + self.spin * (1 - grip)
         elif side == 'bottom':
             vel_rel = self.vel_x - plat_vel
-            self.vel_x = -(copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) - plat_vel) * grip \
-                         + self.vel_x * (1 - grip)
-            self.vel_y *= -1 * bump
+            self.vel_x = -(copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) - plat_vel) * grip + self.vel_x * (1 - grip)
+            self.vel_y = self.vel_y * -1 - copysign(bump, self.vel_y)
             self.spin = -copysign(sqrt(self.mass * vel_rel ** 2 * 2 / self._i) * grip, vel_rel) + self.spin * (1 - grip)
 
     def normal_hit(self, side):
@@ -231,19 +249,22 @@ class Bola:
                     self.rotation + pi / 2, 6)
 
 
-plat = Plataforma(300, screen, (255, 255, 255))
-balls = [Bola(10, screen, (400, 200), vel_x=0)]
+plat = Plataforma(300, screen, WHITE)
+balls = [Bola(10, screen, (400, 200))]
 
 mapa = image_to_map('map.png')
 tiles = []
 for y, lista in enumerate(mapa):
+    tiles.append([])
     for x, value in enumerate(lista):
         if value:
-            tiles.append(pg.Rect(x * TILEWIDTH + 1, y * TILEHEIGHT + 1, TILEWIDTH - 1, TILEHEIGHT - 1))
+            tiles[y].append(pg.Rect(x * TILEWIDTH + 1, y * TILEHEIGHT + 1, TILEWIDTH - 1, TILEHEIGHT - 1))
+        else:
+            tiles[y].append(None)
 
 while True:
     mouse_pos = []
-    screen.fill((0, 0, 0))
+    screen.fill(GREY)
     for event in pg.event.get():
         if event.type == pg.QUIT:
             pg.quit()
@@ -252,30 +273,25 @@ while True:
             mouse_pos = event.pos
 
     balls_to_pop = []
-    tiles_to_pop = []
-    for index, ball in enumerate(balls):
+    for index, ball in sorted(enumerate(balls), reverse=True):
         # platform collide
         if ball.colliderect(plat.rect):
-            ball.spin_hit('bottom', 0.3, plat.velocity, 1.05)
+            ball.spin_hit('bottom', 0.2, plat.velocity, 1.2)
         # surface border collide
-        elif ball.collidesurf() == 'bottom':
-            balls_to_pop.append(index)
-        elif ball.collidesurf():
-            ball.spin_hit(ball.collidesurf(), 0.1)
+        side = ball.collidesurf()
+        if side == 'bottom':
+            balls.pop(index)
+            balls.append(Bola(10, screen, (400, 200), vel_x=0))
+        elif side:
+            ball.spin_hit(side, 0.1, bump=1)
         # tile collide
-        for b, tile in enumerate(tiles):
-            if ball.colliderect(tile):
-                if abs(ball.spin) > 0.3:
-                    ball.spin -= copysign(0.2, ball.spin)
-                else:
-                    ball.spin_hit(ball.colliderect(tile))
-                tiles_to_pop.append(b)
-
-    for ball in balls_to_pop:
-        balls.pop(ball)
-        balls.append(Bola(10, screen, (400, 200), vel_x=0))
-    for tile in tiles_to_pop[::-1]:
-        tiles.pop(tile)
+        side, y, x = ball.collidemap(tiles, TILEWIDTH, TILEHEIGHT)
+        if side:
+            if abs(ball.spin) > 0.3:
+                ball.spin -= copysign(0.2, ball.spin)
+            else:
+                ball.spin_hit(side, bump=0.3)
+            tiles[y][x] = None
 
     if mouse_pos:
         plat.move_to(mouse_pos[0] - plat.width / 2)
@@ -285,8 +301,10 @@ while True:
         ball.aero_move(0.07)
         ball.draw()
 
-    for tile in tiles:
-        screen.fill((50, 50, 250), tile)
+    for row in tiles:
+        for tile in row:
+            if tile:
+                screen.fill(WHITE, tile)
 
     pg.display.update()
     Clock.tick(60)
