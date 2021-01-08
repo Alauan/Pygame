@@ -10,6 +10,11 @@ import sys
 pg.init()
 Clock = pg.time.Clock()
 screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+pg.mixer.pre_init()
+
+
+class Sound:
+    toc = pg.mixer.Sound('toc.wav')
 
 
 class Const:
@@ -234,12 +239,14 @@ class Bola:
         """ a hit with spin """
         if side:
             self.update_tail()
+            Sound.toc.play()
 
         if not 0 <= spin_grip <= 1 or not 0 <= move_grip <= 1:
             raise ValueError("grip must be between 0 and 1")
 
         ini_ec_y = self._ec_y
         ini_ec_x = self._ec_x
+
         if side == Const.RIGHT:
             self.vel_y = copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) * move_grip + self.vel_y * (1 - move_grip)
             self.vel_x = self.vel_x * -1 - copysign(bump, self.vel_x)
@@ -254,6 +261,8 @@ class Bola:
             self.spin = copysign(sqrt(ini_ec_x * 2 / self._i) * spin_grip, self.vel_x) + self.spin * (1 - spin_grip)
         elif side == Const.BOTTOM:
             vel_rel = self.vel_x - plat_vel
+            vel_rel = 80 if vel_rel > 80 else vel_rel
+            vel_rel = -80 if vel_rel < -80 else vel_rel
             self.vel_x = -(copysign(sqrt(self._ec_rot * 2 / self.mass), self.spin) - plat_vel) * move_grip + self.vel_x * (1 - move_grip)
             self.vel_y = self.vel_y * -1 - copysign(bump, self.vel_y)
             self.spin = -copysign(sqrt(self.mass * vel_rel ** 2 * 2 / self._i) * spin_grip, vel_rel) + self.spin * (1 - spin_grip)
@@ -284,12 +293,15 @@ class Bola:
 
     def draw(self):
         # tail
-        r = abs(self.spin) * 40
-        r = 255 if r > 255 else r
-        b = abs(255 - abs(self.spin) * 40)
-        b = 255 if b > 255 else b
-        tail_color = (r, 30, b)
+        base = abs(self.spin) * 60
+        b = 255 - base
+        b = 0 if b < 0 else b
+        g = base if base <= 255 else 510 - base
+        g = 0 if g < 0 else g
+        r = base - 255 if base > 255 else 0
+        r = 255 if base > 510 else r
 
+        tail_color = (r, g, b)
         self.contador += 1
         if not self.contador % 3:
             self.contador = 0
@@ -303,8 +315,7 @@ class Bola:
                                                 sin(angle - pi / 2) * self._radius * self.overhang + pos[1])
 
             pg.draw.polygon(self._surface, tail_color, self.tail_points)
-
-        pg.draw.circle(self._surface, tail_color, self.pos, self._radius * self.overhang)
+            pg.draw.circle(self._surface, tail_color, self.pos, self._radius * self.overhang)
 
         # ball
         pg.draw.circle(self._surface, self._color, self.pos, self._radius)
@@ -365,8 +376,9 @@ class Main:
                 # tile collide
                 side, y, x = ball.collidemap(tiles, Const.TILEWIDTH, Const.TILEHEIGHT)
                 if side:
-                    if abs(ball.spin) > 0.3:
-                        ball.spin -= copysign(0.2, ball.spin)
+                    if abs(ball.spin) > 0.4:
+                        ball.spin -= copysign(0.3, ball.spin)
+                        Sound.toc.play()
                     else:
                         ball.spin_hit(side)
                     tiles[y][x] = None
