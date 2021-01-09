@@ -22,6 +22,8 @@ class Const:
     TILEHEIGHT = 30
     SCREENWIDTH = screen.get_width()
     SCREENHEIGHT = screen.get_height()
+    SCREENWIDTH_20 = SCREENWIDTH // 20
+    SCREENHEIGHT_20 = SCREENHEIGHT // 20
 
     RIGHT = 1
     LEFT = 2
@@ -33,6 +35,9 @@ class Const:
     BLUE = pg.Color((70, 70, 240))
     BLACK = pg.Color((20, 20, 20))
     RED = pg.Color((255, 50, 50))
+    DARKGREY = pg.Color((60, 65, 70))
+
+    font1 = pg.font.SysFont('Agency FB', 60)
 
 
 def image_to_map(image_name):
@@ -274,8 +279,7 @@ class Bola:
         else:
             self.vel_y *= -1
 
-    def update_tail(self):
-        self.overhang = 2
+    def update_tail(self, just_last_segment=False):
         self.tail.append((atan2(self.vel_y, self.vel_x), self.pos))
         self.tail_points = []
         for index, info in enumerate(self.tail):
@@ -320,17 +324,100 @@ class Bola:
         # ball
         pg.draw.circle(self._surface, self._color, self.pos, self._radius)
         pg.draw.arc(self._surface, Const.BLACK, (self.pos[0] - self._radius, self.pos[1] - self._radius,
-                                               self._radius * 2, self._radius * 2), self.rotation,
+                                                 self._radius * 2, self._radius * 2), self.rotation,
                     self.rotation + pi / 2, self._radius)
 
 
 class Main:
-    @staticmethod
-    def level():
+    def __init__(self):
+        self.mouse_pos = (0, 0)
+        self.mouse_bt = 0
+
+    def input_manager(self):
+        running = True
+        for event in pg.event.get():
+            if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
+                pg.mouse.set_visible(True)
+                running = False
+            if event.type == pg.MOUSEMOTION:
+                self.mouse_pos = event.pos
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if event.button != 2:
+                    self.mouse_bt = event.button
+            if event.type == pg.MOUSEBUTTONUP:
+                self.mouse_bt = 0
+        return running
+
+    def menu(self):
+        self.mouse_pos = (0, 0)
+        divs_surf = pg.Surface((18 * Const.SCREENWIDTH_20, 18 * Const.SCREENHEIGHT_20))
+        divs_surf_pos = (Const.SCREENWIDTH_20, Const.SCREENHEIGHT_20)
+        divs_surf.fill((0, 1, 2))
+        divs_surf.set_colorkey((0, 1, 2))
+
+        def create_divs(divs_grid, width, height):
+            divs_dim = (width//divs_grid[0], height//divs_grid[1])
+            divs_rects = []
+
+            for div_y in range(divs_grid[1]):
+                for div_x in range(divs_grid[0]):
+                    divs_rects.append(pg.Rect(div_x * divs_dim[0] + divs_dim[0]/8, div_y * divs_dim[1] + divs_dim[1]/8,
+                                              6 * divs_dim[0]/8, 6 * divs_dim[1]/8))
+            return divs_rects
+
+        level_rects = create_divs((6, 3), divs_surf.get_width(), divs_surf.get_height())
+        original_rects = create_divs((6, 3), divs_surf.get_width(), divs_surf.get_height())
+        numbers_surfs = []
+        for i in range(len(level_rects)):
+            numbers_surfs.append(Const.font1.render(str(i + 1), True, Const.GREY))
+        destaque = []
+
+        while True:
+            screen.fill(Const.GREY)
+            divs_surf.fill((0, 1, 2))
+            self.mouse_bt = 0
+
+            if not self.input_manager():
+                pg.quit()
+                sys.exit()
+
+            for index, rect in enumerate(original_rects):
+                if rect.collidepoint((self.mouse_pos[0] - divs_surf_pos[0], self.mouse_pos[1] - divs_surf_pos[1])):
+                    if index not in destaque:
+                        destaque.append(index)
+                    if self.mouse_bt:
+                        self.level1()
+                elif index in destaque:
+                    destaque.remove(index)
+
+            for index, rect in enumerate(level_rects):
+                if index in destaque:
+                    step_x = (original_rects[index].x - 20 - rect.x) * 0.3
+                    step_y = (original_rects[index].y - 20 - rect.y) * 0.3
+                else:
+                    step_x = (original_rects[index].x - rect.x) * 0.3
+                    step_y = (original_rects[index].y - rect.y) * 0.3
+
+                if not 0 < step_x < 1 and not 0 < step_y < 1:
+                    rect.x += step_x
+                    rect.y += step_y
+                else:
+                    rect.x = original_rects[index].x
+                    rect.y = original_rects[index].y
+
+            for rect in original_rects:
+                pg.draw.rect(divs_surf, Const.DARKGREY, rect)
+            for index, rect in enumerate(level_rects):
+                pg.draw.rect(divs_surf, Const.WHITE, rect)
+                divs_surf.blit(numbers_surfs[index], (rect.x + 20, rect.y + 40))
+            screen.blit(divs_surf, divs_surf_pos)
+            Clock.tick(60)
+            pg.display.update()
+
+    def level1(self):
         plat = Plataforma(600, screen, Const.WHITE)
         balls = [Bola(10, screen, (800, 600))]
-        mouse_pos = (0, 0)
-        mouse_bt = 0
+
         plat_modes = {0: {'color': Const.WHITE, 'spin': 0.4, 'move': 0.4},
                       1: {'color': Const.BLUE, 'spin': 0.6, 'move': 0.2},
                       3: {'color': Const.BLACK, 'spin': 0.2, 'move': 0.6}}
@@ -347,25 +434,17 @@ class Main:
                 else:
                     tiles[y].append(None)
 
-        while True:
+        running = True
+        while running:
             screen.fill(Const.GREY)
-            for event in pg.event.get():
-                if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
-                    pg.quit()
-                    sys.exit()
-                if event.type == pg.MOUSEMOTION:
-                    mouse_pos = event.pos
-                if event.type == pg.MOUSEBUTTONDOWN:
-                    if event.button != 2:
-                        mouse_bt = event.button
-                if event.type == pg.MOUSEBUTTONUP:
-                    mouse_bt = 0
+
+            running = self.input_manager()
 
             for index, ball in sorted(enumerate(balls), reverse=True):
                 # platform collide
                 side = ball.colliderect(plat.rect)
                 if side:
-                    ball.spin_hit(side, plat_modes[mouse_bt]['spin'], plat_modes[mouse_bt]['move'], plat.velocity, 1.2)
+                    ball.spin_hit(side, plat_modes[self.mouse_bt]['spin'], plat_modes[self.mouse_bt]['move'], plat.velocity, 1.2)
                 # surface border collide
                 side = ball.collidesurf()
                 if side == Const.BOTTOM:
@@ -383,8 +462,8 @@ class Main:
                         ball.spin_hit(side)
                     tiles[y][x] = None
 
-            plat.color = plat_modes[mouse_bt]['color']
-            plat.move_to(mouse_pos[0] - plat.width / 2)
+            plat.color = plat_modes[self.mouse_bt]['color']
+            plat.move_to(self.mouse_pos[0] - plat.width / 2)
             plat.draw()
 
             for ball in balls:
@@ -400,5 +479,6 @@ class Main:
             Clock.tick(60)
 
 
+game = Main()
 if __name__ == '__main__':
-    Main.level()
+    game.menu()
