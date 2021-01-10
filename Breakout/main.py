@@ -349,7 +349,6 @@ class Main:
         return running
 
     def menu(self):
-        self.mouse_pos = (0, 0)
         divs_surf = pg.Surface((18 * Const.SCREENWIDTH_20, 18 * Const.SCREENHEIGHT_20))
         divs_surf_pos = (Const.SCREENWIDTH_20, Const.SCREENHEIGHT_20)
         divs_surf.fill((0, 1, 2))
@@ -373,8 +372,6 @@ class Main:
         destaque = []
 
         while True:
-            screen.fill(Const.GREY)
-            divs_surf.fill((0, 1, 2))
             self.mouse_bt = 0
 
             if not self.input_manager():
@@ -386,7 +383,29 @@ class Main:
                     if index not in destaque:
                         destaque.append(index)
                     if self.mouse_bt:
-                        self.level1()
+                        transicao = []
+                        surface = pg.Surface((Const.SCREENWIDTH, Const.SCREENHEIGHT))
+                        surface.set_colorkey((0, 1, 2))
+                        surface.blit(screen, (0, 0))
+                        frames = 20
+                        height = rect.height
+                        width = rect.width
+                        rect_x = level_rects[index].x + divs_surf_pos[0]
+                        rect_y = level_rects[index].y + divs_surf_pos[1]
+                        for i in range(frames):
+                            x = rect_x - rect_x * (i / frames)
+                            y = rect_y - rect_y * (i / frames)
+                            width = rect_x - x + rect.width + (Const.SCREENWIDTH - rect.width - rect_x) * (i / frames)
+                            height = rect_y - y + rect.height + (Const.SCREENHEIGHT - rect.height - rect_y) * (i / frames)
+                            surface.fill((0, 1, 2), (x, y, width, height))
+                            if i == 0:
+                                for b in range(30):
+                                    transicao.append(surface.copy())
+                            else:
+                                transicao.append(surface.copy())
+
+                        self.level1(transicao)
+
                 elif index in destaque:
                     destaque.remove(index)
 
@@ -405,6 +424,9 @@ class Main:
                     rect.x = original_rects[index].x
                     rect.y = original_rects[index].y
 
+            screen.fill(Const.GREY)
+            divs_surf.fill((0, 1, 2))
+
             for rect in original_rects:
                 pg.draw.rect(divs_surf, Const.DARKGREY, rect)
             for index, rect in enumerate(level_rects):
@@ -414,11 +436,12 @@ class Main:
             Clock.tick(60)
             pg.display.update()
 
-    def level1(self):
-        plat = Plataforma(600, screen, Const.WHITE)
+    def level1(self, transicao=()):
+        bg_img = pg.image.load('bg1.png').convert_alpha()
+        plat = Plataforma(600, screen, Const.GREY)
         balls = [Bola(10, screen, (800, 600))]
 
-        plat_modes = {0: {'color': Const.WHITE, 'spin': 0.4, 'move': 0.4},
+        plat_modes = {0: {'color': Const.GREY, 'spin': 0.4, 'move': 0.4},
                       1: {'color': Const.BLUE, 'spin': 0.6, 'move': 0.2},
                       3: {'color': Const.BLACK, 'spin': 0.2, 'move': 0.6}}
         pg.mouse.set_visible(False)
@@ -434,9 +457,21 @@ class Main:
                 else:
                     tiles[y].append(None)
 
+        # transição
+        for surface in transicao:
+            screen.blit(bg_img, (0, 0))
+            plat.draw()
+            for row in tiles:
+                for tile in row:
+                    if tile:
+                        screen.fill(Const.WHITE, tile)
+            screen.blit(surface, (0, 0))
+            pg.display.update()
+            Clock.tick(60)
+
         running = True
         while running:
-            screen.fill(Const.GREY)
+            screen.blit(bg_img, (0, 0))
 
             running = self.input_manager()
 
