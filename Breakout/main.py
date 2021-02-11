@@ -1,20 +1,18 @@
 from math import copysign, sqrt, pi, cos, sin, atan2
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Dict
 import pygame as pg
 from PIL import Image
 from random import random
 import numpy as np
 import sys
 
-
-pg.init()
-Clock = pg.time.Clock()
-screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
-pg.mixer.pre_init()
+level = __import__('levels').Levels()
+screen = __import__('classes').screen
+Clock = __import__('classes').Clock
 
 
 class Sound:
-    toc = pg.mixer.Sound('toc.wav')
+    toc = pg.mixer.Sound('assets/sounds/toc.wav')
 
 
 class Const:
@@ -40,16 +38,55 @@ class Const:
     font1 = pg.font.SysFont('Agency FB', 60)
 
 
-def image_to_map(image_name):
+def image_to_tiles(image_name) -> List[List[Union[Dict, None]]]:
     image = Image.open(image_name)
     data = list(image.getdata())
     width, height = image.size
 
     pixels = []
     for i in range(height):
-        pixels.append([pixel[0] == 0 for pixel in data[i * width:i * width + width]])
+        pixels.append([pixel for pixel in data[i * width:i * width + width]])
 
-    return pixels
+    tiles = []
+    for y, lista in enumerate(pixels):
+        tiles.append([])
+        for x, value in enumerate(lista):
+            if any(value):
+                tiles[y].append({'rect': pg.Rect(x * Const.TILEWIDTH, y * Const.TILEHEIGHT,
+                                         Const.TILEWIDTH, Const.TILEHEIGHT), 'color': value[:3],
+                                 'break': value[3] == 255})
+            else:
+                tiles[y].append(None)
+
+    return tiles
+
+
+def transition(surface, rect, frames, bg_img, plat, tiles, balls):
+    for frame in range(frames + 10):
+        if frame >= 10:
+            x = rect.x - rect.x * (frame / frames)
+            y = rect.y - rect.y * (frame / frames)
+            width = rect.x - x + rect.width + (Const.SCREENWIDTH - rect.width - rect.x) * (frame / frames)
+            height = rect.y - y + rect.height + (Const.SCREENHEIGHT - rect.height - rect.y) * (frame / frames)
+            surface.fill((0, 1, 2), (x, y, width, height))
+        else:
+            surface.fill((0, 1, 2), (rect.x, rect.y, rect.width, rect.height))
+
+        screen.blit(bg_img, (0, 0))
+        plat.draw()
+        draw_tiles(tiles)
+        for ball in balls:
+            ball.draw()
+        screen.blit(surface, (0, 0))
+        pg.display.update()
+        Clock.tick(60)
+
+
+def draw_tiles(tiles):
+    for row in tiles:
+        for tile in row:
+            if tile:
+                screen.fill(tile['color'], tile['rect'].inflate(-1, -1))
 
 
 class Plataforma:
@@ -187,16 +224,16 @@ class Bola:
 
     def collidemap(self, tile_map, tile_width, tile_height) -> Tuple[int, int, int]:
         """ Return the side on witch the ball collided with any tile in a map and the tile indexes"""
-        row1 = int((self.pos[1] - self._radius) // tile_height)
-        row2 = int((self.pos[1] + self._radius)//tile_height + 1)
-        col1 = int((self.pos[0] - self._radius)//tile_width)
-        col2 = int((self.pos[0] + self._radius)//tile_width + 1)
+        row1 = int((self.pos[1] - self._radius + self.vel_y) // tile_height)
+        row2 = int((self.pos[1] + self._radius + self.vel_y)//tile_height + 1)
+        col1 = int((self.pos[0] - self._radius + self.vel_x)//tile_width)
+        col2 = int((self.pos[0] + self._radius + self.vel_x)//tile_width + 1)
         in_range = np.array(tile_map, dtype=object)[row1:row2, col1:col2]
 
         for y, row in enumerate(in_range):
-            for x, rect in enumerate(row):
-                if rect:
-                    side = self.colliderect(rect)
+            for x, tile in enumerate(row):
+                if tile:
+                    side = self.colliderect(tile['rect'])
                     if side:
                         return side, y + row1, x + col1
         return 0, 0, 0
@@ -337,7 +374,6 @@ class Main:
         running = True
         for event in pg.event.get():
             if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
-                pg.mouse.set_visible(True)
                 running = False
             if event.type == pg.MOUSEMOTION:
                 self.mouse_pos = event.pos
@@ -383,28 +419,17 @@ class Main:
                     if index not in destaque:
                         destaque.append(index)
                     if self.mouse_bt:
-                        transicao = []
                         surface = pg.Surface((Const.SCREENWIDTH, Const.SCREENHEIGHT))
                         surface.set_colorkey((0, 1, 2))
                         surface.blit(screen, (0, 0))
-                        frames = 20
-                        height = rect.height
-                        width = rect.width
-                        rect_x = level_rects[index].x + divs_surf_pos[0]
-                        rect_y = level_rects[index].y + divs_surf_pos[1]
-                        for i in range(frames):
-                            x = rect_x - rect_x * (i / frames)
-                            y = rect_y - rect_y * (i / frames)
-                            width = rect_x - x + rect.width + (Const.SCREENWIDTH - rect.width - rect_x) * (i / frames)
-                            height = rect_y - y + rect.height + (Const.SCREENHEIGHT - rect.height - rect_y) * (i / frames)
-                            surface.fill((0, 1, 2), (x, y, width, height))
-                            if i == 0:
-                                for b in range(30):
-                                    transicao.append(surface.copy())
-                            else:
-                                transicao.append(surface.copy())
+                        frames = 40
+                        rectangle = level_rects[index].copy()
+                        rectangle.x += divs_surf_pos[0]
+                        rectangle.y += divs_surf_pos[1]
+                        transicao = [surface, rectangle, frames]
 
-                        self.level1(transicao)
+                        self.level(transicao)
+                        pg.mouse.set_visible(True)
 
                 elif index in destaque:
                     destaque.remove(index)
@@ -436,8 +461,9 @@ class Main:
             Clock.tick(60)
             pg.display.update()
 
-    def level1(self, transicao=()):
-        bg_img = pg.image.load('bg1.png').convert_alpha()
+    def level(self, index, transicao=()):
+
+        bg_img = pg.image.load('assets/backgrounds/bg1.png').convert_alpha()
         plat = Plataforma(600, screen, Const.GREY)
         balls = [Bola(10, screen, (800, 600))]
 
@@ -446,40 +472,26 @@ class Main:
                       3: {'color': Const.BLACK, 'spin': 0.2, 'move': 0.6}}
         pg.mouse.set_visible(False)
 
-        mapa = image_to_map('map.png')
-        tiles = []
-        for y, lista in enumerate(mapa):
-            tiles.append([])
-            for x, value in enumerate(lista):
-                if value:
-                    tiles[y].append(pg.Rect(x * Const.TILEWIDTH + 1, y * Const.TILEHEIGHT + 1,
-                                            Const.TILEWIDTH - 1, Const.TILEHEIGHT - 1))
-                else:
-                    tiles[y].append(None)
+        tiles = image_to_tiles('map2.png')
 
         # transição
-        for surface in transicao:
-            screen.blit(bg_img, (0, 0))
-            plat.draw()
-            for row in tiles:
-                for tile in row:
-                    if tile:
-                        screen.fill(Const.WHITE, tile)
-            screen.blit(surface, (0, 0))
-            pg.display.update()
-            Clock.tick(60)
+        if transicao:
+            transition(*transicao, bg_img, plat, tiles, balls)
 
-        running = True
-        while running:
+        while True:
             screen.blit(bg_img, (0, 0))
 
-            running = self.input_manager()
+            if not self.input_manager():
+                return False
+
+            if not any(any(row) for row in tiles):
+                return True
 
             for index, ball in sorted(enumerate(balls), reverse=True):
                 # platform collide
                 side = ball.colliderect(plat.rect)
                 if side:
-                    ball.spin_hit(side, plat_modes[self.mouse_bt]['spin'], plat_modes[self.mouse_bt]['move'], plat.velocity, 1.2)
+                    ball.spin_hit(side, plat_modes[self.mouse_bt]['spin'], plat_modes[self.mouse_bt]['move'], plat.velocity, 3)
                 # surface border collide
                 side = ball.collidesurf()
                 if side == Const.BOTTOM:
@@ -490,12 +502,15 @@ class Main:
                 # tile collide
                 side, y, x = ball.collidemap(tiles, Const.TILEWIDTH, Const.TILEHEIGHT)
                 if side:
-                    if abs(ball.spin) > 0.4:
-                        ball.spin -= copysign(0.3, ball.spin)
-                        Sound.toc.play()
+                    if tiles[y][x]['break']:
+                        if abs(ball.spin) > 0.4:
+                            ball.spin -= copysign(0.3, ball.spin)
+                            Sound.toc.play()
+                        else:
+                            ball.spin_hit(side)
+                        tiles[y][x] = None
                     else:
                         ball.spin_hit(side)
-                    tiles[y][x] = None
 
             plat.color = plat_modes[self.mouse_bt]['color']
             plat.move_to(self.mouse_pos[0] - plat.width / 2)
@@ -505,10 +520,7 @@ class Main:
                 ball.aero_move(0.07)
                 ball.draw()
 
-            for row in tiles:
-                for tile in row:
-                    if tile:
-                        screen.fill(Const.WHITE, tile)
+            draw_tiles(tiles)
 
             pg.display.update()
             Clock.tick(60)
